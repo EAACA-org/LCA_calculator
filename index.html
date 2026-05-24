@@ -1,0 +1,997 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EAACA Carbon Footprint Calculator - Full Flow</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            blue: '#005A9C',
+                            blueHover: '#00467F',
+                            green: '#78BE20',
+                            greenHover: '#65A31A',
+                            dark: '#020617', // Ciemniejszy, głębszy odcień dla lepszej czytelności (Slate 950)
+                            light: '#F8FAFC',
+                            border: '#CBD5E1', // Lekko przyciemniony border (Slate 300)
+                            muted: '#334155' // Znacznie ciemniejszy szary dla mniejszych tekstów (Slate 700)
+                        }
+                    },
+                    fontFamily: {
+                        'sans': ['Inter', 'sans-serif'],
+                    },
+                    boxShadow: {
+                        'card': '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
+                        'floating': '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+<style>
+    /* Podstawy techniczne */
+body { 
+        background-color: #F8FAFC; 
+        background-image: 
+            radial-gradient(circle at 100% 100%, rgba(248, 250, 252, 0) 0%, rgba(248, 250, 252, 1) 20%),
+            url("AAC_texture.png");
+        background-position: right bottom;
+        background-repeat: no-repeat;
+        background-attachment: fixed;
+    }
+    .step-transition { transition: opacity 0.3s ease, transform 0.3s ease; display: none; opacity: 0; transform: translateY(10px); }
+    .step-transition.active { display: block; opacity: 1; transform: translateY(0); }
+    
+    .selection-card { transition: all 0.2s ease; border: 2px solid #CBD5E1; }
+    .selection-card:hover { border-color: #94A3B8; transform: translateY(-2px); }
+    .selection-card.selected { border-color: #005A9C; background-color: #F0F7FF; box-shadow: 0 4px 12px rgba(0, 90, 156, 0.1); }
+
+    /* Kluczowe poprawki dla tooltipów w wierszach */
+    .wall-row { 
+        transition: all 0.2s ease; 
+        border-left: 3px solid transparent; 
+        position: relative; 
+        overflow: visible !important; /* Pozwala tooltipom wychodzić poza wiersz */
+    }
+    .wall-row:hover { background-color: #F1F5F9; }
+    .wall-row.expanded { border-left-color: #005A9C; background-color: #F8FAFC; border-top: 1px solid #CBD5E1; border-bottom: 1px solid #CBD5E1; }
+    
+    .modules-breakdown { 
+        max-height: 0; 
+        overflow: visible !important; /* Tooltipy muszą być widoczne */
+        transition: max-height 0.3s ease-in-out; 
+        opacity: 0; 
+        padding-top: 0;
+        padding-bottom: 0;
+    }
+    .wall-row.expanded .modules-breakdown { max-height: 500px; opacity: 1; padding-top: 1rem; padding-bottom: 1rem; }
+
+    /* Tooltipy - zaawansowana widoczność */
+    .module-tooltip { 
+        position: relative; 
+        display: inline-flex; 
+        align-items: center; 
+        justify-content: center; 
+        cursor: help; 
+    }
+    .module-tooltip .tooltip-text {
+        visibility: hidden;
+        position: absolute;
+        z-index: 9999;
+        bottom: 140%; 
+        left: 50%;
+        transform: translateX(-50%) translateY(5px);
+        width: 220px;
+        background-color: #1E293B;
+        color: #F8FAFC;
+        text-align: center;
+        border-radius: 8px;
+        padding: 8px 12px;
+        font-size: 0.75rem;
+        line-height: 1.4;
+        opacity: 0;
+        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        pointer-events: none;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
+    }
+    .module-tooltip .tooltip-text::after {
+        content: ""; position: absolute; top: 100%; left: 50%; margin-left: -6px;
+        border-width: 6px; border-style: solid; border-color: #1E293B transparent transparent transparent;
+    }
+    .module-tooltip:hover .tooltip-text {
+        visibility: visible;
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+
+    /* Reszta UI */
+    .modal-base { transition: opacity 0.2s ease; }
+    .modal-base.hidden { opacity: 0; pointer-events: none; }
+    .grid-bg {
+        background-size: 40px 40px;
+        background-image: linear-gradient(to right, rgba(15, 23, 42, 0.03) 1px, transparent 1px),
+                          linear-gradient(to bottom, rgba(15, 23, 42, 0.03) 1px, transparent 1px);
+    }
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+</style>
+</head>
+<body class="text-brand-dark antialiased flex flex-col min-h-screen font-sans">
+
+    <header class="bg-white border-b border-brand-border sticky top-0 z-50 shadow-sm">
+        <div class="container mx-auto px-6 py-4 flex justify-between items-center">
+            <button onclick="goToStep(1)" class="flex items-center gap-3 hover:opacity-80 transition-opacity">
+                <img src="logo.png" alt="EAACA Logo" class="w-10 h-10 object-contain">
+                <div class="flex flex-col text-left">
+                    <span class="text-brand-dark font-bold text-lg leading-none">EAACA</span>
+                    <span class="text-brand-muted text-xs font-medium">CO₂ Calculator</span>
+                </div>
+            </button>
+            <nav class="hidden md:flex gap-8 font-medium text-sm text-brand-muted">
+                <a href="#" class="hover:text-brand-blue transition-colors">About</a>
+                <a href="#" class="hover:text-brand-blue transition-colors">Knowledge Base</a>
+                <a href="#" class="hover:text-brand-blue transition-colors">Contact</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="flex-grow pb-24">
+
+        <section id="step-1" class="step-transition active border-b border-brand-border">
+            <div class="relative overflow-hidden bg-white grid-bg">
+                <div class="container mx-auto px-6 py-20 md:py-32 relative z-10">
+                    <div class="grid lg:grid-cols-2 gap-16 items-center">
+                        <div class="max-w-2xl">
+                            <div class="inline-flex items-center gap-2 bg-slate-100 text-brand-muted font-semibold px-3 py-1 rounded text-xs mb-6 uppercase tracking-wider border border-slate-200">
+                                <i data-lucide="calculator" class="w-3.5 h-3.5"></i> LCA calculation tool
+                            </div>
+                            <h1 class="text-4xl md:text-5xl lg:text-6xl font-extrabold leading-tight mb-6 text-brand-dark tracking-tight">
+                                Build consciously. <br>
+                                <span class="text-brand-blue">Discover the carbon footprint of your wall.</span>
+                            </h1>
+                            <p class="text-lg text-brand-muted mb-10 leading-relaxed font-normal">
+                                Compare technologies, learn about the advantages of autoclaved aerated concrete and its unique ability to <strong>naturally recarbonate, meaning carbon dioxide absorption during the building's lifespan.</strong>
+                            </p>
+                            <div class="flex flex-col sm:flex-row gap-4">
+                                <button onclick="goToStep(2)" class="bg-brand-blue hover:bg-brand-blueHover text-white font-semibold py-3.5 px-8 rounded-lg transition-all flex items-center justify-center gap-2">
+                                    Go to calculator
+                                    <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                                </button>
+                                <button onclick="toggleModal('how-it-works-modal', true)" class="bg-white border border-brand-border hover:bg-slate-50 hover:text-brand-blue text-brand-dark font-medium py-3.5 px-8 rounded-lg transition-all flex items-center justify-center gap-2">
+                                    <i data-lucide="info" class="w-4 h-4 text-brand-muted"></i> How it works?
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="relative h-[450px] flex items-center justify-center group hidden lg:flex">
+                            <div class="relative z-10 w-full h-full rounded-xl overflow-hidden bg-slate-50 border border-brand-border p-8 flex flex-col justify-between shadow-card">
+                                <div class="flex justify-between items-start">
+                                    <div class="text-xs font-mono text-brand-muted">EAACA calculation tool</div>
+
+                                </div>
+                                <div class="flex-grow flex items-center justify-center relative">
+                                    <img src="EAACA.jpg" alt="Wall cross-section" class="w-4/5 h-4/5 object-cover rounded shadow-sm opacity-90 transition-transform duration-500 hover:scale-105 border border-slate-200" 
+     onerror="this.outerHTML='<div class=\'w-4/5 h-4/5 border-2 border-dashed border-brand-blue bg-blue-50/50 flex flex-col items-center justify-center text-brand-blue rounded\'><i data-lucide=\'layers\' class=\'w-12 h-12 mb-2\'></i><span class=\'font-medium\'>Cross-section preview</span></div>'">
+                                    
+                                    <div class="absolute bottom-4 right-4 bg-white/90 backdrop-blur border border-brand-border p-4 rounded text-sm shadow-sm max-w-[280px]">
+                                        <div class="flex items-start gap-2">
+                                            <i data-lucide="leaf" class="w-5 h-5 text-brand-green mt-0.5 flex-shrink-0"></i>
+                                            <p class="text-brand-dark font-medium leading-snug text-xs">
+                                                Build responsibly – discover the carbon footprint of the partition throughout its life cycle.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <div id="how-it-works-modal" class="modal-base fixed inset-0 z-[100] flex items-center justify-center p-4 bg-brand-dark/60 backdrop-blur-sm hidden">
+            <div class="bg-white rounded-xl shadow-floating max-w-2xl w-full max-h-[90vh] overflow-y-auto relative border border-brand-border">
+                <button onclick="toggleModal('how-it-works-modal', false)" class="absolute top-5 right-5 text-brand-muted hover:text-brand-dark transition-colors">
+                    <i data-lucide="x" class="w-6 h-6"></i>
+                </button>
+                <div class="p-8 md:p-10 border-b border-brand-border bg-slate-50 rounded-t-xl">
+                    <div class="flex items-center gap-3 mb-2">
+                        <i data-lucide="cpu" class="w-6 h-6 text-brand-blue"></i>
+                        <h2 class="text-2xl font-extrabold text-brand-dark">Calculation Methodology</h2>
+                    </div>
+                </div>
+                <div class="p-8 md:p-10 space-y-8">
+                    <p class="text-sm text-brand-muted font-medium leading-relaxed">The EAACA Calculator is designed as a professional engineering tool for assessing the global warming potential (GWP) of wall partitions.</p>
+                    
+                    <div class="flex gap-4 items-start">
+                        <div class="bg-blue-50 p-2 rounded text-brand-blue shrink-0 mt-1 border border-blue-100"><i data-lucide="file-check-2" class="w-5 h-5"></i></div>
+                        <div>
+                            <h4 class="font-bold text-brand-dark mb-1">Norms and Standards</h4>
+                            <p class="text-sm text-brand-muted leading-relaxed font-medium">Calculations are performed in accordance with European standards <strong>EN 15804+A2</strong> (Sustainability of construction works) and <strong>EN 15978</strong> (Assessment of environmental performance of buildings).</p>
+                        </div>
+                    </div>
+                    <div class="flex gap-4 items-start">
+                        <div class="bg-green-50 p-2 rounded text-brand-green shrink-0 mt-1 border border-green-100"><i data-lucide="refresh-cw" class="w-5 h-5"></i></div>
+                        <div>
+                            <h4 class="font-bold text-brand-dark mb-1">Life Cycle Assessment (LCA)</h4>
+                            <p class="text-sm text-brand-muted leading-relaxed font-medium">The analysis covers the full 50-year life cycle of the partition (stages A-D): from raw material production (A1-A3), through construction, to the use phase (B) - including <strong>recarbonation</strong> and insulation replacement - ending with demolition (C and D).</p>
+                        </div>
+                    </div>
+                    <div class="flex gap-4 items-start">
+                        <div class="bg-slate-100 p-2 rounded text-brand-muted shrink-0 mt-1 border border-slate-200"><i data-lucide="database" class="w-5 h-5"></i></div>
+                        <div>
+                            <h4 class="font-bold text-brand-dark mb-1">Environmental data sources</h4>
+                            <p class="text-sm text-brand-muted leading-relaxed font-medium">The algorithm uses third-party verified Type III <strong>(EPD)</strong> provided by manufacturers (e.g., Xella Polska) and recognized generic databases like <strong>ÖKOBAUDAT</strong>.</p>
+                        </div>
+                    </div>
+                    <button onclick="toggleModal('how-it-works-modal', false); goToStep(2);" class="w-full mt-4 bg-brand-dark hover:bg-black text-white font-bold py-3.5 rounded-lg transition-all text-sm shadow-md">
+                        I understand, let's go to the calculator
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="custom-mat-modal" class="modal-base fixed inset-0 z-[100] flex items-center justify-center p-4 bg-brand-dark/60 backdrop-blur-sm hidden">
+            <div class="bg-white rounded-xl shadow-floating max-w-lg w-full relative border border-brand-border">
+                <div class="p-6 border-b border-brand-border flex justify-between items-center bg-slate-50 rounded-t-xl">
+                    <div>
+                        <h2 class="text-lg font-extrabold text-brand-dark">Add Custom Material</h2>
+                        <p class="text-xs font-medium text-brand-muted mt-1">Enter material details and LCA stage emissions.</p>
+                    </div>
+                    <button onclick="toggleModal('custom-mat-modal', false)" class="text-brand-muted hover:text-brand-dark"><i data-lucide="x" class="w-5 h-5"></i></button>
+                </div>
+                <div class="p-6 space-y-5">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="col-span-2">
+                            <label class="block text-xs font-bold text-brand-muted mb-1.5 uppercase tracking-wide">Material Name</label>
+                            <input type="text" id="cmat-name" placeholder="e.g. AAC 400 kg/m3" class="w-full px-3 py-2 border border-brand-border rounded font-medium focus:ring-2 focus:ring-brand-blue/20 focus:border-brand-blue outline-none text-sm transition-all">
+                        </div>
+                        <div class="col-span-2">
+                            <label class="block text-xs font-bold text-brand-muted mb-1.5 uppercase tracking-wide">Thermal Conductivity (λ) [W/mK]</label>
+                            <input type="number" step="0.01" id="cmat-lambda" placeholder="0.04" class="w-full px-3 py-2 border border-brand-border rounded font-medium focus:ring-2 focus:ring-brand-blue/20 focus:border-brand-blue outline-none text-sm transition-all">
+                        </div>
+                    </div>
+                    <div class="bg-slate-50 p-4 rounded-lg border border-brand-border">
+                        <div class="text-xs font-bold text-brand-dark mb-3 uppercase tracking-wide">Emissions [kg CO₂e]</div>
+                        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            <div><label class="block text-[10px] font-bold text-brand-muted uppercase mb-1">A1-A3 (Production)</label><input type="number" step="0.1" id="cmat-a1" class="w-full px-2 py-1.5 border border-brand-border rounded text-sm font-medium outline-none focus:border-brand-blue"></div>
+                            <div><label class="block text-[10px] font-bold text-brand-muted uppercase mb-1">A4-A5 (Construction)</label><input type="number" step="0.1" id="cmat-a4" class="w-full px-2 py-1.5 border border-brand-border rounded text-sm font-medium outline-none focus:border-brand-blue"></div>
+                            <div><label class="block text-[10px] font-bold text-brand-green uppercase mb-1">B1 (Recarbonation)</label><input type="number" step="0.1" id="cmat-b1" class="w-full px-2 py-1.5 border border-green-300 bg-green-50 rounded text-sm font-bold outline-none focus:border-brand-green"></div>
+                            <div><label class="block text-[10px] font-bold text-brand-muted uppercase mb-1">B4 (Replacement)</label><input type="number" step="0.1" id="cmat-b4" class="w-full px-2 py-1.5 border border-brand-border rounded text-sm font-medium outline-none focus:border-brand-blue"></div>
+                            <div><label class="block text-[10px] font-bold text-brand-muted uppercase mb-1">C+D (End of life)</label><input type="number" step="0.1" id="cmat-cd" class="w-full px-2 py-1.5 border border-brand-border rounded text-sm font-medium outline-none focus:border-brand-blue"></div>
+                        </div>
+                    </div>
+                    <button onclick="saveCustomMat()" class="w-full bg-brand-blue hover:bg-brand-blueHover text-white font-bold py-3 rounded-lg transition-all shadow-sm text-sm">
+                        Save to Database
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            function renderStepper(currentStep) {
+                const steps = [
+                    { id: 1, label: "Start" },
+                    { id: 2, label: "Building type" },
+                    { id: 3, label: "Comparison" },
+                    { id: 4, label: "Configurator" }
+                ];
+                
+                let html = '<div class="flex items-center justify-between relative max-w-2xl mx-auto mb-12">';
+                // Background line
+                html += '<div class="absolute left-0 right-0 top-3 h-0.5 bg-brand-border z-0"></div>';
+                
+                // Progress line
+                const progressWidth = ((currentStep - 1) / (steps.length - 1)) * 100;
+                html += `<div class="absolute left-0 top-3 h-0.5 bg-brand-blue z-0 transition-all duration-500" style="width: ${progressWidth}%;"></div>`;
+
+                steps.forEach(step => {
+                    const isPast = step.id < currentStep;
+                    const isCurrent = step.id === currentStep;
+                    
+                    let circleClasses = "w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold z-10 transition-colors border-2 bg-white ";
+                    if (isPast) circleClasses += "border-brand-blue text-brand-blue cursor-pointer hover:bg-blue-50";
+                    else if (isCurrent) circleClasses += "border-brand-blue bg-brand-blue text-white ring-4 ring-blue-50";
+                    else circleClasses += "border-brand-border text-brand-muted";
+
+                    let textClasses = "text-[10px] uppercase font-bold mt-2 text-center absolute top-7 w-20 -ml-7 tracking-wide ";
+                    if (isPast || isCurrent) textClasses += "text-brand-dark";
+                    else textClasses += "text-brand-muted";
+
+                    const onClick = isPast ? `onclick="goToStep(${step.id})"` : "";
+                    const innerContent = isPast ? '<i data-lucide="check" class="w-3 h-3"></i>' : step.id;
+
+                    html += `
+                        <div class="relative flex flex-col items-center">
+                            <div class="${circleClasses}" ${onClick}>${innerContent}</div>
+                            <span class="${textClasses}">${step.label}</span>
+                        </div>
+                    `;
+                });
+                
+                html += '</div>';
+                return html;
+            }
+        </script>
+
+        <section id="step-2" class="step-transition py-12 md:py-16">
+            <div class="container mx-auto px-6 max-w-4xl">
+                <div id="stepper-container-2"></div>
+                
+                <div class="text-center max-w-xl mx-auto mb-10 bg-white/60 p-6 rounded-xl backdrop-blur-sm border border-brand-border/50">
+                    <h2 class="text-2xl md:text-3xl font-extrabold text-brand-dark mb-3 tracking-tight">Select building type</h2>
+                    <p class="text-brand-muted text-sm font-medium">This will allow us to adjust wall types, standards and life cycle to specifics of the building.</p>
+                </div>
+                
+                <div class="grid md:grid-cols-2 gap-6 mb-10">
+                    <div id="card-residential" onclick="selectObjectType('residential')" class="selection-card bg-white p-6 rounded-xl cursor-pointer relative flex flex-col items-center text-center group shadow-sm">
+                        <div class="absolute top-4 right-4 w-5 h-5 rounded-full border-2 border-brand-border flex items-center justify-center bg-white z-20 group-[.selected]:border-brand-blue group-[.selected]:bg-brand-blue transition-colors">
+                            <i data-lucide="check" class="w-3 h-3 text-white opacity-0 group-[.selected]:opacity-100 transition-opacity"></i>
+                        </div>
+                        <div class="w-full h-40 mb-5 rounded bg-slate-100 flex items-center justify-center overflow-hidden border border-brand-border/50">
+                            <i data-lucide="home" class="w-12 h-12 text-brand-muted absolute"></i>
+                            <img src="Domek.jpg" alt="Residential Buildings" class="w-full h-full object-cover relative z-10 opacity-90 group-hover:opacity-100 transition-opacity" onerror="this.style.opacity='0'">
+                        </div>
+                        <h3 class="text-lg font-bold text-brand-dark mb-1">Residential Buildings</h3>
+                        <p class="text-xs text-brand-muted font-medium">Single-family homes and multi-family buildings.</p>
+                    </div>
+                    
+                    <div id="card-non-residential" onclick="selectObjectType('non-residential')" class="selection-card bg-white p-6 rounded-xl cursor-pointer relative flex flex-col items-center text-center group shadow-sm">
+                        <div class="absolute top-4 right-4 w-5 h-5 rounded-full border-2 border-brand-border flex items-center justify-center bg-white z-20 group-[.selected]:border-brand-blue group-[.selected]:bg-brand-blue transition-colors">
+                            <i data-lucide="check" class="w-3 h-3 text-white opacity-0 group-[.selected]:opacity-100 transition-opacity"></i>
+                        </div>
+                        <div class="w-full h-40 mb-5 rounded bg-slate-100 flex items-center justify-center overflow-hidden border border-brand-border/50">
+                            <i data-lucide="building-2" class="w-12 h-12 text-brand-muted absolute"></i>
+                            <img src="Nonresidential_2.jpg" alt="Commercial Construction" class="w-full h-full object-cover relative z-10 opacity-90 group-hover:opacity-100 transition-opacity" onerror="this.style.opacity='0'">
+                        </div>
+                        <h3 class="text-lg font-bold text-brand-dark mb-1">Commercial Construction</h3>
+                        <p class="text-xs text-brand-muted font-medium">Office buildings, public utility buildings, industrial halls.</p>
+                    </div>
+                </div>
+                <div class="flex justify-end pt-4 border-t border-brand-border">
+                    <button id="btn-next-step" disabled onclick="goToStep(3)" class="bg-slate-200 text-brand-muted font-bold py-3.5 px-8 rounded-lg opacity-50 cursor-not-allowed transition-all flex items-center gap-2 text-sm shadow-sm">
+                        Proceed to comparison <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <section id="step-3" class="step-transition py-12">
+            <div class="container mx-auto px-4 lg:px-6 max-w-7xl">
+                <div id="stepper-container-3"></div>
+                
+                <div class="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-brand-border pb-6">
+                    <div class="bg-white/60 p-4 rounded-lg backdrop-blur-sm border border-brand-border/50">
+                        <h2 class="text-2xl font-extrabold text-brand-dark mb-1">Carbon Footprint Comparison</h2>
+                        <div class="flex items-center gap-2 text-xs font-semibold text-brand-muted">
+                            <i data-lucide="clock" class="w-3.5 h-3.5"></i> Calculations based on 50-year lifecycle.
+                        </div>
+                    </div>
+
+
+<button onclick="createNewWall()" class="bg-brand-blue hover:bg-brand-blueHover text-white font-bold py-3 px-6 rounded-lg transition-colors duration-200 flex items-center gap-2 shadow-sm">
+                        <i data-lucide="plus" class="w-4 h-4"></i> Add custom wall
+                    </button>
+                </div>
+                
+                <div class="flex gap-1 mb-6 bg-slate-200/50 p-1 rounded-lg inline-flex" id="tabs-container">
+                    <button onclick="switchTab('external')" id="tab-external" class="tab-btn px-4 py-2.5 rounded-md text-sm font-bold transition-colors bg-white text-brand-dark shadow-sm">External Walls</button>
+                    <button onclick="switchTab('internal')" id="tab-internal" class="tab-btn px-4 py-2.5 rounded-md text-sm font-bold transition-colors text-brand-muted hover:text-brand-dark hover:bg-slate-100">Internal Walls</button>
+                    <button onclick="switchTab('partition')" id="tab-partition" class="tab-btn px-4 py-2.5 rounded-md text-sm font-bold transition-colors text-brand-muted hover:text-brand-dark hover:bg-slate-100">Partition Walls</button>
+                </div>
+
+                <div class="grid lg:grid-cols-12 gap-6 items-start">
+                    <div class="lg:col-span-8 space-y-3">
+                        <div class="flex items-center justify-between text-[10px] font-extrabold text-brand-muted uppercase tracking-wider px-4 pb-2 border-b border-brand-border">
+                            <div class="w-1/2">Material solution</div>
+                            <div class="w-1/2 text-right">Total CO₂e (kg/m²) - 50 years</div>
+                        </div>
+                        <div id="walls-list-container" class="space-y-2"></div>
+                    </div>
+                    
+                    <div class="lg:col-span-4 lg:sticky lg:top-24">
+                        <div class="bg-white rounded-xl shadow-card border border-brand-border overflow-hidden flex flex-col min-h-[400px]" id="right-panel">
+                            <div class="p-5 border-b border-brand-border bg-slate-50">
+                                <span class="text-[10px] font-extrabold text-brand-blue uppercase tracking-wider block mb-1">Analyzed system</span>
+                                <h3 id="detail-title" class="font-bold text-base text-brand-dark leading-tight">Select a wall to view details</h3>
+                            </div>
+                            
+                            <div id="detail-content" class="hidden flex-col flex-grow">
+                                <div class="p-4 flex justify-center items-center h-48 bg-white relative border-b border-brand-border/50">
+                                    <i data-lucide="layers" class="w-8 h-8 text-slate-200 absolute"></i>
+                                    <img id="detail-render" src="Domek.jpg" class="w-full h-full object-contain relative z-10 transition-opacity" onerror="this.style.opacity='0'">
+                                </div>
+                                <div class="p-5 flex-grow bg-white">
+                                    <div class="text-sm font-extrabold text-brand-dark uppercase tracking-wide mb-3 flex items-center gap-2">
+                                        <i data-lucide="layers" class="w-4 h-4"></i> Layer layout
+                                    </div>
+                                    <table class="w-full text-xs text-left">
+                                        <thead class="text-brand-muted border-b border-brand-border">
+                                            <tr><th class="py-2 font-bold uppercase tracking-wide">Material</th><th class="py-2 font-bold uppercase tracking-wide text-right">Thick. [cm]</th></tr>
+                                        </thead>
+                                        <tbody id="detail-layers-table" class="divide-y divide-brand-border/50"></tbody>
+                                    </table>
+                                </div>
+                                <div class="p-4 bg-slate-50 border-t border-brand-border">
+                                    <button onclick="goToStep(4)" class="w-full bg-white border-2 border-brand-border hover:border-brand-blue text-brand-dark font-bold py-2.5 rounded-lg transition-colors flex justify-center items-center gap-2 text-sm shadow-sm">
+                                        <i data-lucide="settings-2" class="w-4 h-4"></i> Modify wall structure
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div id="detail-empty" class="flex-grow flex flex-col items-center justify-center p-8 text-center text-brand-muted">
+                                <i data-lucide="mouse-pointer-click" class="w-8 h-8 mb-3 opacity-50"></i>
+                                <p class="text-sm font-medium">Click on any wall from the list on the left to see the layer details.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="step-4" class="step-transition py-12">
+            <div class="container mx-auto px-4 max-w-6xl">
+                <div id="stepper-container-4"></div>
+                
+                <div class="bg-white rounded-xl shadow-card border border-brand-border overflow-hidden">
+                    <div class="bg-slate-900 text-white p-6 md:px-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                        <div>
+                            <h1 class="text-xl font-extrabold flex items-center gap-2">
+                                <i data-lucide="sliders-horizontal" class="w-5 h-5 text-brand-blue"></i> Multi-layer Partition Configurator
+                            </h1>
+                            <p class="text-slate-400 text-xs mt-1 font-medium">Advanced Life Cycle Assessment (LCA) & U-value</p>
+                        </div>
+                        <div class="flex items-center gap-3 w-full md:w-auto">
+                            <input type="text" id="custom-wall-name" placeholder="Name your wall..." class="w-full md:w-56 px-3 py-2 bg-slate-800 border border-slate-700 rounded text-sm text-white font-medium placeholder-slate-400 focus:outline-none focus:border-brand-blue">
+                            <button onclick="saveCustomWall()" class="bg-brand-blue hover:bg-brand-blueHover text-white px-4 py-2.5 rounded text-sm font-bold transition-colors flex items-center whitespace-nowrap gap-2 shadow-sm">
+                                <i data-lucide="save" class="w-4 h-4"></i> Save as new material
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="p-6 md:p-8">
+                        <div class="mb-8">
+                            <div class="flex justify-between items-center mb-4 pb-2 border-b border-brand-border">
+                                <h2 class="text-sm font-extrabold text-brand-dark uppercase tracking-wide">Edit wall layer layout</h2>
+                                <div class="flex gap-2">
+                                    <button onclick="toggleModal('custom-mat-modal', true)" class="text-xs font-bold text-brand-muted hover:text-brand-dark px-3 py-1.5 border border-brand-border rounded transition-colors flex items-center gap-1.5 bg-slate-50 shadow-sm">
+                                        <i data-lucide="plus-square" class="w-3.5 h-3.5"></i> Add custom material
+                                    </button>
+                                    <button onclick="addLayer()" class="text-xs font-bold text-brand-blue bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 border border-blue-200 shadow-sm">
+                                        <i data-lucide="layers" class="w-3.5 h-3.5"></i> Add layer
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="layers-container" class="space-y-2"></div>
+                            
+                            <div class="mt-6 pt-5 border-t border-brand-border flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-50 p-4 rounded-lg border border-brand-border/60">
+                                <div class="flex items-center gap-3">
+                                    <div class="bg-white p-2.5 rounded-lg shadow-sm border border-brand-border/50 text-brand-blue">
+                                        <i data-lucide="thermometer" class="w-6 h-6"></i>
+                                    </div>
+                                    <div class="text-left">
+                                        <div class="text-sm font-extrabold text-brand-dark tracking-wide uppercase">Heat transfer coefficient (U-value)</div>
+                                        <div class="text-[11px] font-medium text-brand-muted mt-0.5">Calculated sum based on thermal conductivities (λ).</div>
+                                    </div>
+                                </div>
+                                <div class="bg-white px-6 py-3 rounded-lg border-2 border-brand-blue flex items-baseline gap-1.5 min-w-[160px] justify-center shadow-sm">
+                                    <span id="u-value-display" class="text-3xl font-black text-brand-blue tracking-tight">0.00</span>
+                                    <span class="text-xs font-bold text-brand-muted">W/(m²K)</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="grid md:grid-cols-2 gap-6">
+                            <div class="border border-brand-border rounded-lg p-5 bg-white relative overflow-hidden shadow-sm">
+                                <div class="absolute top-0 left-0 w-1.5 h-full bg-brand-blue"></div>
+                                <h2 class="text-xs font-extrabold text-brand-dark uppercase tracking-wider mb-4">Total footprint (LCA)</h2>
+                                <div class="flex items-end gap-2 mb-4">
+                                    <p id="total-lca-materials-display" class="text-4xl font-black text-brand-dark leading-none tracking-tight">0.00</p>
+                                    <p class="text-xs font-bold text-brand-muted mb-1">kg CO₂e / m²</p>
+                                </div>
+                                <p class="text-[10px] font-medium text-brand-muted mb-2">Sum of emissions incl. recarbonation (B1)</p>
+                                <div class="w-full h-2.5 bg-slate-100 rounded-full flex overflow-hidden mb-4 border border-brand-border/30" id="impact-bar"></div>
+                                <p class="text-[9px] font-extrabold text-brand-muted uppercase tracking-wider mb-2">Percentage share of materials in the life cycle:</p>
+                                <div id="impact-legend" class="flex flex-col gap-1.5"></div>
+                            </div>
+                            
+                            <div class="border border-brand-border rounded-lg p-5 bg-slate-50 relative shadow-sm">
+                                <h2 class="text-xs font-extrabold text-brand-dark uppercase tracking-wider mb-1">Life Cycle Phases (A-D)</h2>
+                                <p class="text-[10px] font-medium text-brand-muted mb-4">50-year analysis</p>
+                                <div class="space-y-4" id="lca-chart-container"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        // Init Icons
+        function updateIcons() {
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
+        }
+
+        // DATABASE (Reverted to EXACT original strings)
+        const materialsDB = {
+            "aac_300": { name: "AAC Block (300 kg/m³)", epd_source: "EPD Xella Polska", color: "bg-brand-blue", lambda: 0.075, gwp: { a1_a3: 147, a4_a5: 8.75, b1: -60.3, b4: 0.0, c_d: -1.19 } },
+            "aac_500": { name: "AAC Block (500 kg/m³)", epd_source: "EPD Xella Polska", color: "bg-sky-500", lambda: 0.14, gwp: { a1_a3: 170.0, a4_a5: 9.99, b1: -76.2, b4: 0.0, c_d: -0.23 } },
+            "ceramic": { name: "Ceramic Block", epd_source: "Oekobaudat", color: "bg-orange-500", lambda: 0.18, gwp: { a1_a3: 113.0, a4_a5: 4.97, b1: 0.0, b4: 0.0, c_d: -10.1 } },
+            "silicate": { name: "Silicate Block (1400 kg/m³)", epd_source: "Oekobaudat", color: "bg-slate-500", lambda: 0.80, gwp: { a1_a3: 189.0, a4_a5: 26.4, b1: -83.9, b4: 0.0, c_d: -3.34 } },
+            "eps_standard": { name: "EPS Insulation", epd_source: "Oekobaudat", color: "bg-amber-400", lambda: 0.038, gwp: { a1_a3: 45.0, a4_a5: 4.0, b1: 0.0, b4: 45.0, c_d: 15.0 } },
+            "mw_standard": { name: "Mineral Wool", epd_source: "Oekobaudat", color: "bg-yellow-600", lambda: 0.036, gwp: { a1_a3: 67.0, a4_a5: 6.0, b1: 0.0, b4: 80.0, c_d: 5.0 } },
+            "plaster_ext": { name: "External Light Plaster", epd_source: "Oekobaudat", color: "bg-slate-300", lambda: 0.80, gwp: { a1_a3: 180.0, a4_a5: 15.0, b1: 0.0, b4: 0.0, c_d: 2.0 } },
+            "plaster_int": { name: "Internal Plaster", epd_source: "Oekobaudat", color: "bg-slate-200", lambda: 0.40, gwp: { a1_a3: 120.0, a4_a5: 10.0, b1: 0.0, b4: 0.0, c_d: 1.0 } },
+            "gk_board": { name: "Gypsum Board (G-K)", epd_source: "Generic", color: "bg-stone-300", lambda: 0.25, gwp: { a1_a3: 250.0, a4_a5: 15.0, b1: 0.0, b4: 0.0, c_d: 5.0 } }
+        };
+
+        const wallDataRaw = [
+            { id: 'v1', type: 'external', image: 'aac_300_single.jpg', name: 'AAC monolithic wall 36,5 cm 300 kg/m³ (36.5 cm)', shortName: 'AAC monolithic wall 36,5 cm', layers: [{ id: 'plaster_int', thick: '1.0' }, { id: 'aac_300', thick: '36.5' }, { id: 'plaster_ext', thick: '1.5' }] },
+            { id: 'v2', type: 'external', image: 'aac_500_eps.jpg', name: 'AAC 500 (24cm) + EPS (12cm)', shortName: 'AAC 24 cm + EPS 12 cm', layers: [{ id: 'plaster_int', thick: '1.5' }, { id: 'aac_500', thick: '24.0' }, { id: 'eps_standard', thick: '12.0' }, { id: 'plaster_ext', thick: '0.5' }] },
+            { id: 'v3', type: 'external', image: 'aac_500_mw.jpg', name: 'AAC 500 (24cm) + Mineral Wool (12cm)', shortName: 'AAC 24 cm + Min. wool 12 cm', layers: [{ id: 'plaster_int', thick: '1.5' }, { id: 'aac_500', thick: '24.0' }, { id: 'mw_standard', thick: '12.0' }, { id: 'plaster_ext', thick: '0.5' }] },
+            { id: 'v4', type: 'external', image: 'ceramic_eps.jpg', name: 'Ceramic Block (25cm) + EPS (16cm)', shortName: 'Clay bricks 25 cm + EPS 16 cm', layers: [{ id: 'plaster_int', thick: '1.5' }, { id: 'ceramic', thick: '25.0' }, { id: 'eps_standard', thick: '16.0' }, { id: 'plaster_ext', thick: '0.5' }] },
+            { id: 'v5', type: 'external', image: 'ceramic_mw.jpg', name: 'Ceramic Block (25cm) + Mineral Wool (16cm)', shortName: 'Clay bricks 25 cm + Min. Wool 16 cm', layers: [{ id: 'plaster_int', thick: '1.5' }, { id: 'ceramic', thick: '25.0' }, { id: 'mw_standard', thick: '16.0' }, { id: 'plaster_ext', thick: '0.5' }] },
+            { id: 'v6', type: 'external', image: 'silicate_eps.jpg', name: 'Silicate Block 1650 (18cm) + EPS (18cm)', shortName: 'CSU 18 cm + EPS 18 cm', layers: [{ id: 'plaster_int', thick: '1.5' }, { id: 'silicate', thick: '18.0' }, { id: 'eps_standard', thick: '18.0' }, { id: 'plaster_ext', thick: '0.5' }] },
+            { id: 'v7', type: 'external', image: 'silicate_mw.jpg', name: 'Silicate Block 1650 (18cm) + Mineral Wool (18cm)', shortName: 'CSU 18 cm + Min. Wool 18 cm', layers: [{ id: 'plaster_int', thick: '1.5' }, { id: 'silicate', thick: '18.0' }, { id: 'mw_standard', thick: '18.0' }, { id: 'plaster_ext', thick: '0.5' }] },
+            
+            { id: 'i1', type: 'internal', image: 'aac_500_internal.jpg', name: 'Internal Wall AAC 500 (24 cm)', shortName: 'AAC 500 Uninsulated', layers: [{ id: 'plaster_int', thick: '1.5' }, { id: 'aac_500', thick: '24.0' }, { id: 'plaster_int', thick: '1.5' }] },
+            { id: 'i2', type: 'internal', image: 'ceramic_internal.jpg', name: 'Internal Wall Ceramic (25 cm)', shortName: 'Ceramic Uninsulated', layers: [{ id: 'plaster_int', thick: '1.5' }, { id: 'ceramic', thick: '25.0' }, { id: 'plaster_int', thick: '1.5' }] },
+            { id: 'i3', type: 'internal', image: 'silicate_internal.jpg', name: 'Internal Wall Silicate (18 cm)', shortName: 'Silicate Uninsulated', layers: [{ id: 'plaster_int', thick: '1.5' }, { id: 'silicate', thick: '18.0' }, { id: 'plaster_int', thick: '1.5' }] },
+            
+            { id: 'p1', type: 'partition', image: 'aac_partition.jpg', name: 'Partition Wall AAC (11.5 cm)', shortName: 'AAC 11.5 + Plaster', layers: [{ id: 'plaster_int', thick: '1.0' }, { id: 'aac_500', thick: '11.5' }, { id: 'plaster_int', thick: '1.0' }] },
+            { id: 'p2', type: 'partition', image: 'ceramic_partition.jpg', name: 'Partition Wall Ceramic (11.5 cm)', shortName: 'Ceramic 11.5 + Plaster', layers: [{ id: 'plaster_int', thick: '1.5' }, { id: 'ceramic', thick: '11.5' }, { id: 'plaster_int', thick: '1.5' }] },
+            { id: 'p3', type: 'partition', image: 'silicate_partition.jpg', name: 'Partition Wall Silicate (8 cm)', shortName: 'Silicate 8 + Plaster', layers: [{ id: 'plaster_int', thick: '1.0' }, { id: 'silicate', thick: '8.0' }, { id: 'plaster_int', thick: '1.0' }] },
+            { id: 'p4', type: 'partition', image: 'drywall_partition.jpg', name: 'Drywall System (G-K + Min. Wool)', shortName: 'Drywall System', layers: [{ id: 'gk_board', thick: '1.25' }, { id: 'mw_standard', thick: '7.5' }, { id: 'gk_board', thick: '1.25' }] }
+        ];
+
+        let wallData = [];
+        let selectedWallId_Krok3 = null; 
+        let currentLayers = [];
+        let activeTab = 'external';
+
+        // ENGINE
+        function calculateWallData() {
+            wallData = wallDataRaw.map(wall => {
+                let modules = { a1_a3: 0, a4_a5: 0, b1: 0, b4: 0, c_d: 0 };
+                let primaryColor = '#334155'; // Zaktualizowany default muted
+                wall.layers.forEach(l => {
+                    const mat = materialsDB[l.id];
+                    if(mat && (l.id.includes('aac') || l.id.includes('ceramic') || l.id.includes('silicate') || l.id.includes('custom'))) {
+                        const twColorMap = {'bg-brand-blue': '#005A9C', 'bg-sky-500': '#0EA5E9', 'bg-orange-500': '#F97316', 'bg-slate-500': '#475569', 'bg-purple-500': '#A855F7'};
+                        primaryColor = twColorMap[mat.color] || '#005A9C';
+                    }
+                    const t = parseFloat(l.thick) / 100;
+                    if(mat) {
+                        modules.a1_a3 += mat.gwp.a1_a3 * t;
+                        modules.a4_a5 += mat.gwp.a4_a5 * t;
+                        modules.b1 += mat.gwp.b1 * t;
+                        modules.b4 += mat.gwp.b4 * t;
+                        modules.c_d += mat.gwp.c_d * t;
+                    }
+                });
+                const totalCO2 = modules.a1_a3 + modules.a4_a5 + modules.b1 + modules.b4 + modules.c_d;
+                return { ...wall, totalCO2, modules, color: primaryColor };
+            });
+        }
+        calculateWallData(); 
+
+        // NAVIGATION
+        function toggleModal(modalId, show) {
+            const modal = document.getElementById(modalId);
+            if (!modal) return;
+            if (show) modal.classList.remove('hidden');
+            else modal.classList.add('hidden');
+        }
+
+        function goToStep(step) {
+            document.querySelectorAll('.step-transition').forEach(el => el.classList.remove('active'));
+            const stepEl = document.getElementById('step-' + step);
+            
+            // Inject stepper
+            if(step > 1) {
+                const stepContainer = document.getElementById('stepper-container-' + step);
+                if(stepContainer) stepContainer.innerHTML = renderStepper(step);
+            }
+
+            if (stepEl) {
+                stepEl.classList.add('active');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                
+                if (step === 3) {
+                    if(!selectedWallId_Krok3) updateRightPanel(null); 
+                    renderWallsList();
+                }
+                if (step === 4) {
+                    loadSelectedWallIntoConfigurator();
+                    renderLayers();
+                }
+            }
+            updateIcons();
+        }
+
+        // STEP 2: Selection
+        function selectObjectType(type) {
+            const btnNext = document.getElementById('btn-next-step');
+            document.querySelectorAll('.selection-card').forEach(card => card.classList.remove('selected'));
+            
+            if (type === 'residential') document.getElementById('card-residential').classList.add('selected');
+            else if (type === 'non-residential') document.getElementById('card-non-residential').classList.add('selected');
+            
+            if (btnNext) {
+                btnNext.disabled = false;
+                btnNext.classList.remove('bg-slate-200', 'text-brand-muted', 'cursor-not-allowed', 'opacity-50');
+                btnNext.classList.add('bg-brand-blue', 'text-white', 'hover:bg-brand-blueHover', 'shadow-sm');
+            }
+        }
+
+        // STEP 3: Comparison logic
+        function switchTab(tabId) {
+            activeTab = tabId;
+            selectedWallId_Krok3 = null;
+
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('bg-white', 'text-brand-dark', 'shadow-sm');
+                btn.classList.add('text-brand-muted');
+            });
+
+            const activeBtn = document.getElementById('tab-' + tabId);
+            if(activeBtn) {
+                activeBtn.classList.remove('text-brand-muted');
+                activeBtn.classList.add('bg-white', 'text-brand-dark', 'shadow-sm');
+            }
+
+            renderWallsList();
+            updateRightPanel(null); 
+        }
+
+       function renderWallsList() {
+            const container = document.getElementById('walls-list-container');
+            if (!container) return;
+            container.innerHTML = '';
+            
+            const filteredWalls = wallData.filter(w => w.type === activeTab);
+            
+            if (filteredWalls.length === 0) {
+                container.innerHTML = `<div class="p-8 text-center text-sm font-semibold text-brand-muted border border-dashed border-brand-border rounded">No walls added in this category yet.</div>`;
+                return;
+            }
+
+            const maxCO2 = Math.max(...filteredWalls.map(w => w.totalCO2)) + 5; // buffer
+            
+            filteredWalls.forEach(wall => {
+                const barWidth = Math.max(0, (wall.totalCO2 / maxCO2) * 100);
+                const isActive = wall.id === selectedWallId_Krok3;
+                
+                container.innerHTML += `
+                    <div id="row-${wall.id}" class="wall-row bg-white border border-brand-border rounded shadow-sm cursor-pointer mb-2 ${isActive ? 'expanded' : ''}" onclick="selectWall('${wall.id}')">
+                        <div class="px-4 py-3 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div class="md:w-5/12 flex items-center gap-4">
+                                <div class="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 bg-slate-100 border border-brand-border relative flex items-center justify-center">
+                                    <i data-lucide="image" class="w-5 h-5 text-slate-300 absolute z-0"></i>
+                                    <img src="${wall.image || 'Domek.jpg'}" alt="${wall.shortName}" class="w-full h-full object-cover relative z-10 transition-opacity" onerror="this.style.opacity='0'">
+                                </div>
+                                <span class="font-bold text-brand-dark text-xs leading-tight">${wall.shortName}</span>
+                            </div>
+                            <div class="md:w-7/12 flex items-center gap-3">
+                                <div class="flex-grow h-1.5 bg-slate-100 rounded-full overflow-hidden relative border border-slate-200">
+                                    <div class="absolute top-0 left-0 h-full rounded-full transition-all duration-700" style="width: ${barWidth}%; background-color: ${wall.color};"></div>
+                                </div>
+                                <div class="w-16 text-right">
+                                    <span class="font-black text-sm text-brand-dark">${wall.totalCO2.toFixed(1)}</span>
+				<span class="text-[9px] font-bold text-brand-muted block leading-none">kg CO<sub>2</sub>E/m<sup>2</sup></span>
+                                </div>
+                                <i data-lucide="chevron-down" class="w-4 h-4 text-brand-muted transform transition-transform ${isActive ? 'rotate-180 text-brand-blue' : ''}"></i>
+                            </div>
+                        </div>
+                        
+<div class="modules-breakdown bg-white border-t border-gray-100 px-6">
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4 pt-2">
+        <div class="text-center p-3 rounded-lg bg-gray-50 border border-gray-100">
+            <div class="module-tooltip flex-col items-center justify-center gap-0 mb-1 w-full">
+                <span class="text-[9px] text-gray-400 uppercase font-bold tracking-wider mb-0.5">Product Stage</span>
+                <div class="text-xs text-brand-muted uppercase font-bold flex items-center justify-center gap-1">
+                    <i data-lucide="factory" class="w-3.5 h-3.5"></i> A1-A3 
+                    <i data-lucide="info" class="w-3 h-3 text-gray-400 hover:text-brand-blue transition-colors ml-0.5"></i>
+                </div>
+                <span class="tooltip-text"><strong>Product Stage:</strong> raw material extraction, transport to the factory, and the material manufacturing process.</span>
+            </div>
+            <div class="text-sm font-extrabold text-brand-dark">${wall.modules.a1_a3.toFixed(1)}</div>
+        </div>
+        
+        <div class="text-center p-3 rounded-lg bg-gray-50 border border-gray-100">
+            <div class="module-tooltip flex-col items-center justify-center gap-0 mb-1 w-full">
+                <span class="text-[9px] text-gray-400 uppercase font-bold tracking-wider mb-0.5">Construction</span>
+                <div class="text-xs text-brand-muted uppercase font-bold flex items-center justify-center gap-1">
+                    <i data-lucide="truck" class="w-3.5 h-3.5"></i> A4-A5 
+                    <i data-lucide="info" class="w-3 h-3 text-gray-400 hover:text-brand-blue transition-colors ml-0.5"></i>
+                </div>
+                <span class="tooltip-text"><strong>Construction Process:</strong> transport of materials to the construction site and the installation/construction process.</span>
+            </div>
+            <div class="text-sm font-extrabold text-brand-dark">${wall.modules.a4_a5.toFixed(1)}</div>
+        </div>
+
+        <div class="text-center p-3 rounded-lg bg-green-50 border border-green-200 shadow-sm">
+            <div class="module-tooltip flex-col items-center justify-center gap-0 mb-1 w-full">
+                <span class="text-[9px] text-green-600/70 uppercase font-bold tracking-wider mb-0.5">Use Stage</span>
+                <div class="text-xs text-brand-green uppercase font-bold flex items-center justify-center gap-1">
+                    <i data-lucide="leaf" class="w-3.5 h-3.5"></i> B1 
+                    <i data-lucide="info" class="w-3 h-3 text-green-500 hover:text-green-700 transition-colors ml-0.5"></i>
+                </div>
+                <span class="tooltip-text"><strong>Use Stage:</strong> e.g. natural recarbonation, meaning the absorption of CO₂ from the atmosphere.</span>
+            </div>
+            <div class="text-sm font-black text-green-700">${wall.modules.b1 < 0 ? '' : '+'}${wall.modules.b1.toFixed(1)}</div>
+        </div>
+
+        <div class="text-center p-3 rounded-lg ${wall.modules.b4 > 0 ? 'bg-orange-50 border border-orange-200' : 'bg-gray-50 border border-gray-100'}">
+            <div class="module-tooltip flex-col items-center justify-center gap-0 mb-1 w-full">
+                <span class="text-[9px] ${wall.modules.b4 > 0 ? 'text-orange-600/70' : 'text-gray-400'} uppercase font-bold tracking-wider mb-0.5">Replacement</span>
+                <div class="text-xs ${wall.modules.b4 > 0 ? 'text-orange-600' : 'text-brand-muted'} uppercase font-bold flex items-center justify-center gap-1">
+                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> B4 
+                    <i data-lucide="info" class="w-3 h-3 ${wall.modules.b4 > 0 ? 'text-orange-400' : 'text-gray-400'} hover:text-brand-blue transition-colors ml-0.5"></i>
+                </div>
+                <span class="tooltip-text"><strong>Replacement:</strong> emissions from replacing components (e.g., EPS/wool insulation) over a 50-year perspective.</span>
+            </div>
+            <div class="text-sm font-extrabold ${wall.modules.b4 > 0 ? 'text-orange-700' : 'text-brand-dark'}">${wall.modules.b4.toFixed(1)}</div>
+        </div>
+
+        <div class="text-center p-3 rounded-lg bg-gray-50 border border-gray-100">
+            <div class="module-tooltip flex-col items-center justify-center gap-0 mb-1 w-full">
+                <span class="text-[9px] text-gray-400 uppercase font-bold tracking-wider mb-0.5">End of Life</span>
+                <div class="text-xs text-brand-muted uppercase font-bold flex items-center justify-center gap-1">
+                    <i data-lucide="recycle" class="w-3.5 h-3.5"></i> C+D 
+                    <i data-lucide="info" class="w-3 h-3 text-gray-400 hover:text-brand-blue transition-colors ml-0.5"></i>
+                </div>
+                <span class="tooltip-text"><strong>End of Life:</strong> demolition, waste transport, disposal, and benefits from recycling/reuse.</span>
+            </div>
+            <div class="text-sm font-extrabold text-brand-dark">${wall.modules.c_d.toFixed(1)}</div>
+        </div>
+    </div>
+</div>
+                    </div>`;
+            });
+            updateIcons();
+        }
+
+        function selectWall(id) {
+            if(selectedWallId_Krok3 === id) {
+                selectedWallId_Krok3 = null;
+            } else {
+                selectedWallId_Krok3 = id;
+            }
+            renderWallsList(); // Re-render for simplicity of managing classes
+            
+            if(selectedWallId_Krok3) {
+                updateRightPanel(wallData.find(w => w.id === id));
+            } else {
+                updateRightPanel(null);
+            }
+        }
+
+        function updateRightPanel(wall) {
+            const titleEl = document.getElementById('detail-title');
+            const tbody = document.getElementById('detail-layers-table');
+            const detailContent = document.getElementById('detail-content');
+            const detailEmpty = document.getElementById('detail-empty');
+            const imgEl = document.getElementById('detail-render');
+            
+            if (!wall) {
+                if(detailContent) detailContent.classList.add('hidden');
+                if(detailEmpty) detailEmpty.classList.remove('hidden');
+                return;
+            }
+
+            if(detailEmpty) detailEmpty.classList.add('hidden');
+            if(detailContent) {
+                detailContent.classList.remove('hidden');
+                detailContent.classList.add('flex');
+            }
+
+            if(titleEl) titleEl.textContent = wall.name;
+            if(imgEl) {
+                imgEl.src = wall.image || 'Domek.jpg';
+                imgEl.style.opacity = '1';
+            }
+
+            if(tbody) {
+                tbody.innerHTML = wall.layers.map(layer => `<tr><td class="py-1.5 font-bold text-brand-dark">${materialsDB[layer.id]?.name || layer.id}</td><td class="py-1.5 text-right font-bold text-brand-dark">${layer.thick}</td></tr>`).join('');
+            }
+        }
+
+        // STEP 4: Configurator
+        function createNewWall() {
+            selectedWallId_Krok3 = null; 
+            const nameInput = document.getElementById('custom-wall-name');
+            if (nameInput) nameInput.value = ''; 
+            goToStep(4); 
+        }
+
+        function loadSelectedWallIntoConfigurator() {
+            const nameInput = document.getElementById('custom-wall-name');
+            if(!selectedWallId_Krok3) {
+                currentLayers = [{ id: "aac_500", thickCm: 24.0 }];
+                if (nameInput) nameInput.value = '';
+                return;
+            }
+            const wall = wallData.find(w => w.id === selectedWallId_Krok3);
+            if(wall) {
+                currentLayers = wall.layers.map(l => ({ id: l.id, thickCm: parseFloat(l.thick) }));
+                if (nameInput) nameInput.value = wall.id.startsWith('user_') ? wall.name : '';
+            }
+        }
+
+        function renderLayers() {
+            const container = document.getElementById('layers-container');
+            if(!container) return;
+            container.innerHTML = '';
+            
+            currentLayers.forEach((layer, index) => {
+                const optionsHTML = Object.keys(materialsDB).map(k => `<option value="${k}" ${k === layer.id ? 'selected' : ''}>${materialsDB[k].name}</option>`).join('');
+                container.innerHTML += `
+                    <div class="flex flex-col md:flex-row gap-3 items-end bg-white p-3 rounded border border-brand-border shadow-sm">
+                        <div class="w-full md:flex-grow">
+                            <label class="block text-[10px] font-extrabold text-brand-muted uppercase mb-1 tracking-wide">Layer ${index + 1}</label>
+                            <select onchange="updateLayer(${index}, 'id', this.value)" class="w-full px-3 py-2 bg-slate-50 border border-brand-border rounded text-sm font-bold text-brand-dark focus:ring-2 focus:ring-brand-blue/20 outline-none">${optionsHTML}</select>
+                        </div>
+                        <div class="w-full md:w-32">
+                            <label class="block text-[10px] font-extrabold text-brand-muted uppercase mb-1 tracking-wide">Thickness (cm)</label>
+                            <input type="number" step="0.1" value="${layer.thickCm}" oninput="updateLayer(${index}, 'thickCm', this.value)" class="w-full px-3 py-2 bg-white border border-brand-border rounded text-sm font-bold text-brand-dark focus:ring-2 focus:ring-brand-blue/20 outline-none">
+                        </div>
+                        <button onclick="removeLayer(${index})" class="text-brand-muted hover:text-red-500 p-2 mb-0.5 border border-transparent hover:border-red-200 hover:bg-red-50 rounded transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                    </div>`;
+            });
+            updateIcons();
+            calculateAndDisplayResult();
+        }
+
+        function addLayer() { currentLayers.push({ id: "eps_standard", thickCm: 15.0 }); renderLayers(); }
+        function removeLayer(index) { if (currentLayers.length > 1) { currentLayers.splice(index, 1); renderLayers(); } }
+        function updateLayer(index, field, value) {
+            if (field === 'thickCm') currentLayers[index][field] = parseFloat(value) || 0;
+            else currentLayers[index][field] = value;
+            if (field === 'id') renderLayers(); else calculateAndDisplayResult();
+        }
+
+        function calculateAndDisplayResult() {
+            let totals = { a1_a3: 0, a4_a5: 0, b1: 0, b4: 0, c_d: 0, all: 0 };
+            const impactsLCA = []; 
+            let rTotal = 0.17; // Rsi + Rse (Standard thermal resistances)
+            
+            currentLayers.forEach(layer => {
+                const mat = materialsDB[layer.id];
+                if(!mat) return;
+                const tM = layer.thickCm / 100;
+                if (mat.lambda) rTotal += (tM / mat.lambda);
+
+                const a1_a3 = mat.gwp.a1_a3 * tM; 
+                const a4_a5 = mat.gwp.a4_a5 * tM; 
+                const b1 = mat.gwp.b1 * tM; 
+                const b4 = mat.gwp.b4 * tM; 
+                const c_d = mat.gwp.c_d * tM;
+                
+                const layerTotal = a1_a3 + a4_a5 + b1 + b4 + c_d;
+                totals.a1_a3 += a1_a3; totals.a4_a5 += a4_a5; totals.b1 += b1; totals.b4 += b4; totals.c_d += c_d; totals.all += layerTotal;
+                impactsLCA.push({ name: mat.name, impact: layerTotal, color: mat.color });
+            });
+            
+            // U-Value
+            const uValue = 1 / rTotal;
+            document.getElementById('u-value-display').innerText = uValue.toFixed(2);
+
+            // LCA Totals
+            document.getElementById('total-lca-materials-display').innerText = totals.all.toFixed(2);
+            
+            // Render Impact Bar
+            const barContainer = document.getElementById('impact-bar');
+            const legendContainer = document.getElementById('impact-legend');
+            barContainer.innerHTML = ''; legendContainer.innerHTML = '';
+            
+            const positiveTotal = impactsLCA.reduce((sum, item) => sum + Math.max(0, item.impact), 0);
+            impactsLCA.forEach(item => {
+                const percent = positiveTotal > 0 ? (Math.max(0, item.impact) / positiveTotal) * 100 : 0;
+                if (percent > 0) {
+                    barContainer.innerHTML += `<div class="h-full ${item.color} border-r border-white/50 last:border-0" style="width: ${percent}%"></div>`;
+                    legendContainer.innerHTML += `
+                        <div class="flex items-center justify-between text-[10px] font-bold border-b border-slate-200 pb-1.5">
+                            <div class="flex items-center gap-1.5"><div class="w-2.5 h-2.5 rounded-full ${item.color}"></div><span class="text-brand-dark">${item.name}</span></div>
+                            <span class="text-brand-muted">${percent.toFixed(0)}%</span>
+                        </div>`;
+                }
+            });
+            
+            // Render LCA Chart (BI Style Bar Chart)
+            const lcaContainer = document.getElementById('lca-chart-container');
+            lcaContainer.innerHTML = '';
+            const lcaData = [
+                { label: 'A1-A3 (Production)', value: totals.a1_a3, color: 'bg-slate-400' }, 
+                { label: 'A4-A5 (Construction)', value: totals.a4_a5, color: 'bg-slate-500' }, 
+                { label: 'B1 (Recarbonation)', value: totals.b1, color: 'bg-brand-green' }, 
+                { label: 'B4 (Insulation repl.)', value: totals.b4, color: 'bg-amber-400' }, 
+                { label: 'C+D (End of life)', value: totals.c_d, color: 'bg-slate-600' }
+            ];
+            const maxVal = Math.max(...lcaData.map(d => Math.abs(d.value)), 10);
+            
+            lcaData.forEach(item => {
+                const widthPercent = (Math.abs(item.value) / maxVal) * 50; // max 50% width on each side of the Y-axis
+                
+                // Chart building with zero-axis in the middle
+                let barHTML = item.value < 0 ? 
+                    `<div class="w-1/2 flex justify-end h-full"><div class="${item.color} h-full rounded-l-sm transition-all" style="width: ${widthPercent}%;"></div></div><div class="w-px bg-slate-300 h-full z-10 relative"></div><div class="w-1/2 flex justify-start h-full"></div>` : 
+                    `<div class="w-1/2 flex justify-end h-full"></div><div class="w-px bg-slate-300 h-full z-10 relative"></div><div class="w-1/2 flex justify-start h-full"><div class="${item.color} h-full rounded-r-sm transition-all" style="width: ${widthPercent}%;"></div></div>`;
+                
+lcaContainer.innerHTML += `
+    <div class="flex flex-col">
+        <div class="flex justify-between text-[10px] font-extrabold text-brand-muted mb-0.5 tracking-wide">
+            <span>${item.label}</span>
+            <span class="${item.value < 0 ? 'text-brand-green' : 'text-brand-dark'}">${item.value > 0 ? '+' : ''}${item.value.toFixed(2)}</span>
+        </div>
+        <div class="h-3.5 w-full bg-slate-200 rounded-sm flex items-center overflow-hidden relative border border-slate-300/50">${barHTML}</div>
+    </div>`;
+            });
+        }
+
+        function saveCustomMat() {
+            const name = document.getElementById('cmat-name').value || 'Custom Material';
+            const lambda = parseFloat(document.getElementById('cmat-lambda').value) || 0.1;
+            const a1 = parseFloat(document.getElementById('cmat-a1').value) || 0;
+            const a4 = parseFloat(document.getElementById('cmat-a4').value) || 0;
+            const b1 = parseFloat(document.getElementById('cmat-b1').value) || 0;
+            const b4 = parseFloat(document.getElementById('cmat-b4').value) || 0;
+            const cd = parseFloat(document.getElementById('cmat-cd').value) || 0;
+
+            const matId = 'custom_mat_' + Date.now();
+            materialsDB[matId] = {
+                name: name,
+                epd_source: "User Data",
+                color: "bg-purple-500", 
+                lambda: lambda,
+                gwp: { a1_a3: a1, a4_a5: a4, b1: b1, b4: b4, c_d: cd }
+            };
+
+            toggleModal('custom-mat-modal', false);
+            document.querySelectorAll('#custom-mat-modal input').forEach(input => input.value = '');
+            if (document.getElementById('step-4').classList.contains('active')) renderLayers();
+        }
+
+        function saveCustomWall() {
+            const newId = 'user_' + Date.now();
+            const nameInput = document.getElementById('custom-wall-name');
+            const customName = (nameInput && nameInput.value.trim() !== '') ? nameInput.value.trim() : 'Custom Configuration';
+            let shortLabel = (nameInput && nameInput.value.trim() !== '') ? nameInput.value.trim() : currentLayers.map(l => (materialsDB[l.id]?.name || 'Mat').split(' ')[0]).join(' + ');
+
+            const newWall = {
+                id: newId,
+                type: activeTab,
+                image: 'Domek.jpg', 
+                name: customName,
+                shortName: shortLabel,
+                layers: JSON.parse(JSON.stringify(currentLayers.map(l => ({ id: l.id, thick: l.thickCm.toString() }))))
+            };
+
+            wallDataRaw.push(newWall);
+            calculateWallData();
+            goToStep(3);
+            switchTab(activeTab);
+            setTimeout(() => { selectWall(newId); }, 100);
+        }
+
+        window.onload = () => {
+            updateIcons();
+            goToStep(1); 
+        };
+    </script>
+</body>
+</html>
